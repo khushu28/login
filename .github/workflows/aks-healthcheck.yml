@@ -1,0 +1,39 @@
+name: AKS Health Check & Rollout
+
+on:
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}     # Set this secret in GitHub with your Azure service principal
+
+      - name: Set AKS context
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: AKSwebT
+          cluster-name: WebTAKS
+      
+      - name: Get nginx Pod Name
+        id: podname
+        run: |
+          POD_NAME=$(kubectl get pod -n demo -l app=nginx-demo -o jsonpath='{.items[0].metadata.name}')
+          echo "pod_name=${POD_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Run health check, restart if not healthy
+        run: |
+          set +e
+          kubectl exec -n demo ${{ steps.podname.outputs.pod_name }} -- curl -f http://localhost/
+          if [ $? -ne 0 ]; then
+            echo "Health check failed, rolling out restart"
+            kubectl rollout restart deployment/nginx-demo -n demo
+          else
+            echo "Health check passed"
+          fi
